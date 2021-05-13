@@ -311,11 +311,11 @@ void loop()
 
 
   //out = String(p[0]) + ";" + String(p_d[0]);
-    Serial.print(steps[0]);
-    Serial.print(";");
-    Serial.print(sp[0]);
-    Serial.print(";");
-    Serial.println(p_d[0]);
+    Serial.println(steps[0]);
+//    Serial.print(";");
+//    Serial.print(sp[0]);
+//    Serial.print(";");
+//    Serial.println(p_d[0]);
 
     //Serial.println(sp[0]);
 
