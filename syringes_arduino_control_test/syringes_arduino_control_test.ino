@@ -34,23 +34,26 @@ bool motor_enabled[n_motors];
 float offset_p[n_motors]; // offset pressure
 float p_d[n_motors]; // target pressure
 float p[n_motors]; // pressure
+float sp[n_motors] = {0,0}; // smoothed pressure
 
 int steps[n_motors] = {0, 0};
 float e[n_motors] = {0, 0};
 float eI[n_motors] = {0, 0};
 float e_prev[n_motors] = {0, 0};
 float u[n_motors] = {0, 0};
-float kp[n_motors] = {7.0, 1.0};
+float kp[n_motors] = {700.0, 1.0};
 //float ki[n_motors] = {20.0, 0.0};
 float ki[n_motors] = {0.0, 0.0};
 float kd[n_motors] = {0.0, 0.0};
 const float ss_percentage = 5 / 100;
 const float dt = 1.0 / 100.0; // Must match the Timer 2 frequency
+
 bool steady_state = true;
 
 bool stop_control_system = true;
 
 bool gohome = false;
+bool stopnow = false;
 
 
 
@@ -91,10 +94,13 @@ void setup()
   // enable timer compare interrupt
   TIMSK2 |= (1 << OCIE2A);
 
+  pinMode(valvePin, OUTPUT);
+  
   for (int i = 0; i < n_motors; i++)
   {
     pinMode(stepPins[i], OUTPUT);
     pinMode(dirPins[i], OUTPUT);
+    
     cnt[i] = 0;
     mtr_ticks[i] = 10000;
     motor_enabled[i] = true;
@@ -106,7 +112,7 @@ void setup()
 
   Serial.begin(9600); // opens serial port, sets data rate to 9600 bps
   Serial.setTimeout(1);
-  
+
   // get offset
   for (int i = 0; i < n_motors; i++) {
     offset_p[i] = analogRead(analogPins[i]) * 0.0048828125 * 42.1316; //measure offset
@@ -171,56 +177,77 @@ ISR(TIMER1_COMPA_vect)
 
 ISR(TIMER2_COMPA_vect)
 {
-  for (int i = 0; i < n_motors; i++)
-  {
-    //Home check
-    if (gohome == true && digitalRead(buttonPins[0]) == 1) {
-      digitalWrite(dirPins[i], 1);
-      mtr_ticks[i] = SPEED2TICKS((unsigned int)abs(5000));
-      digitalWrite(valvePin, HIGH);
-      motor_enabled[i] = true;
-    }
-    else if (gohome == true && digitalRead(buttonPins[0]) == 0) {
-      digitalWrite(valvePin, LOW);
-      motor_enabled[i] = false;
-    }
-    else {
-      digitalWrite(valvePin, LOW);
-      // PID
-      // REMARK: put (eventually) analog read here
-      e[i] = (p_d[i] - p[i]);
-      if (e[i] < 0)
-        digitalWrite(dirPins[i], FORWARD);
-      else
+  if (stopnow) {
+    stop_control_system = true;
+    gohome = false;
+    digitalWrite(valvePin, LOW);
+  }
+  else {
+    stop_control_system = false;
+    for (int i = 0; i < n_motors; i++)
+    {
+      //Home check
+      if (gohome == true && digitalRead(buttonPins[0]) == 1) {
         digitalWrite(dirPins[i], BACKWARD);
-      eI[i] += e[i] * dt;
-      u[i] =
-        kp[i] * e[i] // Proportional
-        + ki[i] * eI[i] // Integral
-        + kd[i] * (e[i] - e_prev[i]) / dt // Derivative TODO: consider to derive p instead of e to avoid spikes in case of sharp transition in the setpoint
-        ;
-      //if( p_d[i] -  p_d[i]*ss_percentage < p[i] && p[i] > p_d[i] + p_d[i]*ss_percentage )
-      if (abs(e[i]) < 3)
-      {
-        steady_state = true;
-        eI[i] = 0;
-        mtr_ticks[i] = MAX_MOTOR_TICKS;
-        motor_enabled[i] = false;
-      }
-      else
-      {
-        steady_state = false;
-        if (abs(u[i]) > MAX_MOTOR_SPEED)
-          u[i] = MAX_MOTOR_SPEED;
-        mtr_ticks[i] = SPEED2TICKS((unsigned int)abs(u[i]));
+        mtr_ticks[i] = SPEED2TICKS((unsigned int)abs(5000));
+        digitalWrite(valvePin, HIGH);
+        //Serial.println("valve is on");
         motor_enabled[i] = true;
+        //Serial.println("hi");
       }
-
-      //Safety stop
-      if (digitalRead(dirPins[i]) == BACKWARD && digitalRead(buttonPins[0]) == 0) {
-        //mtr_ticks[i] = SPEED2TICKS((unsigned int)abs(0));
+      else if (gohome == true && digitalRead(buttonPins[0]) == 0) {
+        digitalWrite(valvePin, LOW);
         motor_enabled[i] = false;
-   
+        gohome = false;
+        p_d[i] = 0;
+        p[i] = 0;
+      }
+      else {
+        digitalWrite(valvePin, LOW);
+        // PID
+        // REMARK: put (eventually) analog read here
+        e[i] = (p_d[i] - sp[i]);
+        //Serial.println(e[0]);
+        if (e[i] > 0) {
+          digitalWrite(dirPins[i], FORWARD);
+          //Serial.println("Forward");
+        }
+        else {
+          digitalWrite(dirPins[i], BACKWARD);
+          //Serial.println("Backward");
+        }
+        eI[i] += e[i] * dt;
+        u[i] =
+          kp[i] * e[i] // Proportional
+          + ki[i] * eI[i] // Integral
+          + kd[i] * (e[i] - e_prev[i]) / dt // Derivative TODO: consider to derive p instead of e to avoid spikes in case of sharp transition in the setpoint
+          ;
+        //if( p_d[i] -  p_d[i]*ss_percentage < p[i] && p[i] > p_d[i] + p_d[i]*ss_percentage )
+        if (abs(e[i]) < 1)
+        {
+          steady_state = true;
+          eI[i] = 0;
+          mtr_ticks[i] = MAX_MOTOR_TICKS;
+          motor_enabled[i] = false;
+        }
+        else
+        {
+          steady_state = false;
+          if (abs(u[i]) > MAX_MOTOR_SPEED)
+            u[i] = MAX_MOTOR_SPEED;
+          mtr_ticks[i] = SPEED2TICKS((unsigned int)abs(u[i]));
+          motor_enabled[i] = true;
+        }
+
+        //Safety stop
+        if (digitalRead(dirPins[0]) == BACKWARD && digitalRead(buttonPins[0]) == 0) {
+          //mtr_ticks[i] = SPEED2TICKS((unsigned int)abs(0));
+          motor_enabled[i] = false;
+          //Serial.println("Emergency");
+        }
+        else {
+          motor_enabled[i] = true;
+        }
       }
     }
   }
@@ -232,12 +259,14 @@ void loop()
   // if put in the ISR2. The resulting command produces higher noise from the stepper.
   // Leave it here for the moment.
 
-  for (int i = 0; i < n_motors; i++)
-      p[i] = analogRead(analogPins[i])*0.0048828125*42.1316 - offset_p[i];
+  for (int i = 0; i < n_motors; i++){
+    p[i] = analogRead(analogPins[i]) * 0.0048828125 * 42.1316 - offset_p[i];
+    sp[i] = 0.1*p[i]+0.9*sp[i];
+  }
   //  ////////////////////
   //
   //  //p[1] = p[0]; // TODO: Remove
-
+ 
 
 
   message = Serial.readStringUntil(';');
@@ -245,9 +274,10 @@ void loop()
   switch (message.toInt())
   {
     case STOP_CMD:
-      stop_control_system = true;
-      gohome = false;
-      digitalWrite(valvePin, LOW);
+      //      stop_control_system = true;
+      //      gohome = false;
+      //      digitalWrite(valvePin, LOW);
+      stopnow = true;
       return;
     case RESTART_CMD:
       stop_control_system = false;
@@ -255,20 +285,22 @@ void loop()
       digitalWrite(valvePin, LOW);
       return;
     case TARGET_PRESSURE:
+      stopnow = false;
       message = Serial.readStringUntil(';');
       //Serial.print("Setting Target Pressure to: ");
       //Serial.println(message.toFloat());
       // TODO: Change
       p_d[0] = message.toFloat();
-      p_d[1] = message.toFloat();
+      //p_d[1] = message.toFloat();
       motor_enabled[0] = true;
-      motor_enabled[1] = true;
+      //motor_enabled[1] = true;
       stop_control_system = false;
       gohome = false;
       digitalWrite(valvePin, LOW);
       /////
       return;
     case HOME:
+      stopnow = false;
       stop_control_system = false;
       gohome = true;
       return;
@@ -278,11 +310,14 @@ void loop()
 
 
 
-  out = String(p[0]) + ";" + String(p_d[0]);
-  Serial.print(steps[0]);
-  Serial.print(";");
-  Serial.println(out);
-  //Serial.println(cnt[0]);
+  //out = String(p[0]) + ";" + String(p_d[0]);
+    Serial.print(steps[0]);
+    Serial.print(";");
+    Serial.print(sp[0]);
+    Serial.print(";");
+    Serial.println(p_d[0]);
+
+    //Serial.println(sp[0]);
 
 }
 
