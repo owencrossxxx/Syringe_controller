@@ -1,7 +1,6 @@
-//To-do
-// PID test
-//counter
-//python script
+//Possible to-do
+//Add a stopper for the max step - however we dont need that much of pressure at this stage.
+
 
 
 #define STEPS_PER_REVOLUTION 200*16
@@ -34,13 +33,13 @@ bool motor_enabled[n_motors];
 float offset_p[n_motors]; // offset pressure
 float p_d[n_motors]; // target pressure
 float p[n_motors]; // pressure
-float sp[n_motors] = {0,0}; // smoothed pressure
+float sp[n_motors] = {0, 0}; // smoothed pressure
 
-int steps[n_motors] = {0, 0};
-float e[n_motors] = {0, 0};
-float eI[n_motors] = {0, 0};
-float e_prev[n_motors] = {0, 0};
-float u[n_motors] = {0, 0};
+float steps[n_motors] = {0.0, 0.0};
+float e[n_motors] = {0.0, 0.0};
+float eI[n_motors] = {0.0, 0.0};
+float e_prev[n_motors] = {0.0, 0.0};
+float u[n_motors] = {0.0, 0.0};
 float kp[n_motors] = {700.0, 1.0};
 //float ki[n_motors] = {20.0, 0.0};
 float ki[n_motors] = {0.0, 0.0};
@@ -95,12 +94,12 @@ void setup()
   TIMSK2 |= (1 << OCIE2A);
 
   pinMode(valvePin, OUTPUT);
-  
+
   for (int i = 0; i < n_motors; i++)
   {
     pinMode(stepPins[i], OUTPUT);
     pinMode(dirPins[i], OUTPUT);
-    
+
     cnt[i] = 0;
     mtr_ticks[i] = 10000;
     motor_enabled[i] = true;
@@ -165,11 +164,13 @@ ISR(TIMER1_COMPA_vect)
       digitalWrite(stepPins[i], LOW);
       cnt[i] = 0;
       if (digitalRead(dirPins[i] == FORWARD)) {
-        steps[i]++;
+        steps[i] = steps[i] + 1;
       }
       else {
-        steps[i]--;
+        steps[i] = steps[i] - 1;
       }
+
+
     }
   }
 }
@@ -198,7 +199,6 @@ ISR(TIMER2_COMPA_vect)
       else if (gohome == true && digitalRead(buttonPins[0]) == 0) {
         digitalWrite(valvePin, LOW);
         motor_enabled[i] = false;
-        gohome = false;
         p_d[i] = 0;
         p[i] = 0;
       }
@@ -259,14 +259,14 @@ void loop()
   // if put in the ISR2. The resulting command produces higher noise from the stepper.
   // Leave it here for the moment.
 
-  for (int i = 0; i < n_motors; i++){
+  for (int i = 0; i < n_motors; i++) {
     p[i] = analogRead(analogPins[i]) * 0.0048828125 * 42.1316 - offset_p[i];
-    sp[i] = 0.1*p[i]+0.9*sp[i];
+    sp[i] = 0.1 * p[i] + 0.9 * sp[i];
   }
   //  ////////////////////
   //
   //  //p[1] = p[0]; // TODO: Remove
- 
+
 
 
   message = Serial.readStringUntil(';');
@@ -282,6 +282,7 @@ void loop()
     case RESTART_CMD:
       stop_control_system = false;
       gohome = false;
+      stopnow = false;
       digitalWrite(valvePin, LOW);
       return;
     case TARGET_PRESSURE:
@@ -289,7 +290,6 @@ void loop()
       message = Serial.readStringUntil(';');
       //Serial.print("Setting Target Pressure to: ");
       //Serial.println(message.toFloat());
-      // TODO: Change
       p_d[0] = message.toFloat();
       //p_d[1] = message.toFloat();
       motor_enabled[0] = true;
@@ -311,13 +311,13 @@ void loop()
 
 
   //out = String(p[0]) + ";" + String(p_d[0]);
-    Serial.println(steps[0]);
-//    Serial.print(";");
-//    Serial.print(sp[0]);
-//    Serial.print(";");
-//    Serial.println(p_d[0]);
+  Serial.print(steps[0]);
+  Serial.print(";");
+  Serial.print(sp[0]);
+  Serial.print(";");
+  Serial.println(p_d[0]);
 
-    //Serial.println(sp[0]);
+  //Serial.println(sp[0]);
 
 }
 
